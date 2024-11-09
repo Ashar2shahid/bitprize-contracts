@@ -9,7 +9,7 @@ contract RandomNumberGenerator is Ownable {
     Bit public bitToken;
     address public prizePool; // Address of the PrizePool contract
 
-    constructor(address _bitToken, address _prizePool) Ownable(msg.sender) {
+    constructor(address _bitToken, address _prizePool) Ownable() {
         bitToken = Bit(_bitToken);
         prizePool = _prizePool; // Set the PrizePool address
     }
@@ -22,7 +22,7 @@ contract RandomNumberGenerator is Ownable {
         require(totalBits > 0, "Total Bits must be greater than zero");
 
         // Generate a random index between 0 and totalBits
-        uint256 randomIndex = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao))) % totalBits;
+        uint256 randomIndex = uint256(keccak256(abi.encodePacked(block.timestamp, block.difficulty))) % totalBits;
         
         // Use the Bit's balanceOf to determine the winner
         address winner;

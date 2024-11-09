@@ -9,7 +9,11 @@ contract Bit is ERC20, Ownable {
     mapping(address => bool) private isHolder;
     address public gameMinter;
 
-    constructor() Ownable(msg.sender) ERC20("Pool Bit", "BIT") {}
+    constructor() Ownable() ERC20("Pool Bit", "BIT") {}
+
+    function decimals() public view virtual override returns (uint8) {
+        return 6;
+    }
 
     function mint(address to, uint256 amount) external onlyOwner {
         _mint(to, amount);
@@ -63,16 +67,21 @@ contract Bit is ERC20, Ownable {
         return holders[index];
     }
 
-    function _update(address from, address to, uint256 value) internal override {
-        super._update(from, to, value);
+    // Overriding transfer to handle holder tracking
+    function _beforeTokenTransfer(
+        address from,
+        address to,
+        uint256 amount
+    ) internal override {
+        super._beforeTokenTransfer(from, to, amount);
 
-        // Check if 'from' balance is zero after transfer, to potentially remove from holders list
-        if (from != address(0) && balanceOf(from) == 0 && isHolder[from]) {
+        // If transferring from an existing holder, check if they should be removed
+        if (from != address(0) && balanceOf(from) == amount) {
             _removeHolder(from);
         }
 
-        // Check if 'to' should be added to the holders list
-        if (to != address(0) && !isHolder[to] && balanceOf(to) > 0) {
+        // If transferring to a new holder, add them to the holders list
+        if (to != address(0) && !isHolder[to] && balanceOf(to) == 0) {
             holders.push(to);
             isHolder[to] = true;
         }

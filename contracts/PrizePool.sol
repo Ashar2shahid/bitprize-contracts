@@ -3,17 +3,22 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "./AaveYieldSource.sol";
 import "./RandomNumberGenerator.sol";
 import "./Bit.sol";
 
-interface IYieldContract {
-    function collectYield() external returns (uint256);
+interface IAaveYieldSource {
+    function supplyTokenTo(uint256 depositAmount, address to) external;
+    function redeemToken(uint256 redeemAmount) external returns (uint256);
+    function sponsor(uint256 amount) external;
+    function claimRewards(address to) external returns (bool);
+    function redeemYieldAndTransferToOwner() external returns (uint256);
 }
 
 contract PrizePool is Ownable {
     IERC20 public usdcToken;
     Bit public bitToken;
-    IYieldContract public yieldContract;
+    IAaveYieldSource public aTokenYieldSource;
     RandomNumberGenerator public rng;
 
     bool public isDrawActive;
@@ -30,12 +35,12 @@ contract PrizePool is Ownable {
     constructor(
         address _usdcToken,
         address _bitToken,
-        address _yieldContract,
+        address _aaveYieldSource,
         address _rng
-    ) Ownable(msg.sender) {
+    ) Ownable() {
         usdcToken = IERC20(_usdcToken);
         bitToken = Bit(_bitToken);
-        yieldContract = IYieldContract(_yieldContract);
+        aTokenYieldSource = IAaveYieldSource(_aaveYieldSource);
         rng = RandomNumberGenerator(_rng);
         isDrawActive = false;
     }
@@ -67,6 +72,11 @@ contract PrizePool is Ownable {
         // Transfer deposit to the pool
         usdcToken.transferFrom(msg.sender, address(this), amount);
 
+        usdcToken.approve(address(aTokenYieldSource), amount);
+
+        // Supply the deposit to the Aave Yield Source
+        aTokenYieldSource.supplyTokenTo(amount, address(this));
+
         // Track the depositor if they're depositing for the first time
         if (balances[msg.sender] == 0) {
             depositors.push(msg.sender);
@@ -84,8 +94,22 @@ contract PrizePool is Ownable {
     function withdraw(uint256 amount) external onlyWhenDrawActive {
         require(balances[msg.sender] >= amount, "Insufficient balance");
 
+        // Redeem the deposit from the Aave Yield Source
+        aTokenYieldSource.redeemToken(amount);
+
         // Update user's balance
         balances[msg.sender] -= amount;
+
+        if(balances[msg.sender] == 0) {
+            // Remove the user from the depositors list
+            for (uint256 i = 0; i < depositors.length; i++) {
+                if (depositors[i] == msg.sender) {
+                    depositors[i] = depositors[depositors.length - 1];
+                    depositors.pop();
+                    break;
+                }
+            }
+        }
 
         // Burn proportional Bits from the user
         bitToken.burn(msg.sender, amount);
@@ -97,8 +121,9 @@ contract PrizePool is Ownable {
     }
 
     function _collectYieldAndDistribute() private {
-        // Collect the yield from the Yield Contract
-        uint256 yieldAmount = yieldContract.collectYield();
+
+        // Burn all Bits
+        _returnAllDeposits();
 
         // Choose a random winner from Bit holders
         uint256 totalBits = bitToken.totalSupply();
@@ -106,14 +131,15 @@ contract PrizePool is Ownable {
 
         address winner = rng.getRandomBitHolder(totalBits);
 
+        aTokenYieldSource.redeemYieldAndTransferToOwner();
+
         // Transfer the collected yield to the winner
-        usdcToken.transfer(winner, yieldAmount);
+        usdcToken.transfer(winner, usdcToken.balanceOf(address(this)));
 
-        emit YieldDistributed(winner, yieldAmount);
+        emit YieldDistributed(winner, usdcToken.balanceOf(winner));
 
-        // Burn all Bits and return deposits
         _burnAllBitTokens();
-        _returnAllDeposits();
+
     }
 
     function _burnAllBitTokens() private {
@@ -138,8 +164,9 @@ contract PrizePool is Ownable {
 
             if (holderDepositBalance > 0) {
                 // Return the deposit to the holder
+                // Redeem the deposit from the Aave Yield Source
+                aTokenYieldSource.redeemToken(holderDepositBalance);
                 usdcToken.transfer(holder, holderDepositBalance);
-
                 // Reset the user's deposit balance
                 balances[holder] = 0;
             }
@@ -157,7 +184,7 @@ contract PrizePool is Ownable {
             return 0;
         }
 
-        return (holderBits * 100) / totalBits;
+        return (holderBits * 10000) / totalBits;
     }
 
     function getUserDeposit(address holder) external view returns (uint256) {
@@ -176,9 +203,5 @@ contract PrizePool is Ownable {
 
     function getTotalParticipants() external view returns (uint256) {
         return depositors.length;
-    }
-
-    function getPotentialReward() external view returns (uint256) {
-        return usdcToken.balanceOf(address(yieldContract));
     }
 }

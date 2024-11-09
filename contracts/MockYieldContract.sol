@@ -11,7 +11,7 @@ contract MockYieldContract is Ownable {
     event YieldDeposited(address indexed user, uint256 amount);
     event YieldCollected(uint256 amount);
 
-    constructor(address _usdcToken, address _prizePool) Ownable(msg.sender) {
+    constructor(address _usdcToken, address _prizePool) Ownable() {
         usdcToken = IERC20(_usdcToken);
         prizePool = _prizePool; // Set the PrizePool address
     }
